@@ -4,32 +4,44 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
+const (
+	MAX_CONN      = 20
+	MIN_CONN      = 1
+	PROGRESS_SIZE = 30
+)
+
 type summon struct {
-	concurrency int              // No. of connections
-	uri         string           // URL of the file we want to download
-	chunks      map[int]*os.File // Map of temporary files we are creating
-	err         error            // used when error occurs inside a goroutine
-	startTime   time.Time        // to track time took
-	fileName    string           // name of the file we are downloading
-	out         *os.File         // output / downloaded file
-	*sync.RWMutex
+	concurrency   int               //No. of connections
+	uri           string            //URL of the file we want to download
+	chunks        map[int]*os.File  //Map of temporary files we are creating
+	err           error             //used when error occurs inside a goroutine
+	startTime     time.Time         //to track time took
+	fileName      string            //name of the file we are downloading
+	out           *os.File          //output / downloaded file
+	progressBar   map[int]*progress //index => progress
+	stop          chan error        //to handle stop signals from terminal
+	*sync.RWMutex                   //mutex to lock the maps which accessing it concurrently
 }
 
-const (
-	MAX_CONN = 60
-	MIN_CONN = 1
-)
+type progress struct {
+	curr  int //curr is the current read till now
+	total int //total bytes which we are supposed to read
+}
 
 func init() {
 	log.SetOutput(os.Stdout)
@@ -37,7 +49,6 @@ func init() {
 }
 
 func main() {
-	// url := "https://s1download.krakenfiles.com/force-download/NWEzMGM3YmJjOGRiYWQxYTAGs4PXEpyaaRU8LJikTvHudCIc5amJWp1KELuJ7Hkg/B0Jit25nUB"
 
 	sum, err := NewSummon()
 	if err != nil {
@@ -48,13 +59,19 @@ func main() {
 		return
 	}
 
+	//get the user kill signals
+	go sum.catchSignals()
+
 	if err := sum.run(); err != nil {
 		log.Fatalf("ERROR : %s", err)
 	}
-	log.Println("Time took :", time.Now().Sub(sum.startTime).Seconds())
+
+	log.Printf("Time took : %v", time.Since(sum.startTime))
+
 }
 
 func NewSummon() (*summon, error) {
+
 	c := flag.Int("c", 0, "number of concurrent connections")
 	h := flag.Bool("h", false, "displays available flags")
 	o := flag.String("o", "", "output path of downloaded file, default is same directory.")
@@ -64,10 +81,6 @@ func NewSummon() (*summon, error) {
 		flag.PrintDefaults()
 		fmt.Println("\nExample Usage - $GOBIN/summon -c 5 http://www.africau.edu/images/default/sample.pdf")
 		return nil, nil
-	}
-
-	if *c <= 0 {
-		*c = 1
 	}
 
 	if len(flag.Args()) <= 0 {
@@ -87,61 +100,36 @@ func NewSummon() (*summon, error) {
 	sum.startTime = time.Now()
 	sum.fileName = filepath.Base(sum.uri)
 	sum.RWMutex = &sync.RWMutex{}
+	sum.progressBar = make(map[int]*progress)
+	sum.stop = make(chan error)
 
 	if err := sum.createOutputFile(*o); err != nil {
 		return nil, err
 	}
 
 	return sum, nil
-}
-
-// run is basically the start method
-func (sum *summon) run() error {
-
-	isSupported, contentLength, err := getRangeDetails(sum.uri)
-
-	log.Println("Multiple Connections Supported :", isSupported, " | Got Content Length :", contentLength)
-	log.Println("Using", sum.concurrency, "connections")
-
-	if err != nil {
-		return err
-	}
-
-	return sum.process(contentLength)
 
 }
 
-// getRangeDetails returns ifRangeIsSupported,statuscode,error
-func getRangeDetails(u string) (bool, int, error) {
-	request, err := http.NewRequest("HEAD", u, strings.NewReader(""))
-	if err != nil {
-		return false, 0, fmt.Errorf("Error while creating request : %v", err)
+// setConcurrency set the concurrency as per min and max
+func (sum *summon) setConcurrency(c int) {
+
+	if c <= MIN_CONN {
+		sum.concurrency = MIN_CONN
+		return
 	}
 
-	sc, headers, _, err := doAPICall(request)
-	if err != nil {
-		return false, 0, fmt.Errorf("Error calling url : %v", err)
+	if c >= MAX_CONN {
+		sum.concurrency = MAX_CONN
+		return
 	}
 
-	if sc != 200 && sc != 206 {
-		return false, 0, fmt.Errorf("Did not get 200 or 206 response")
-	}
-
-	conLen := headers.Get("Content-Length")
-	cl, err := strconv.Atoi(conLen)
-	if err != nil {
-		return false, 0, fmt.Errorf("Error Parsing content length : %v", err)
-	}
-
-	//Accept-Ranges: bytes
-	if headers.Get("Accept-Ranges") != "bytes" {
-		return false, cl, nil
-	}
-
-	return true, cl, nil
+	sum.concurrency = c
 }
 
+// createOutputFile ...
 func (sum *summon) createOutputFile(opath string) error {
+
 	var fname string
 
 	if opath != "" {
@@ -168,23 +156,23 @@ func (sum *summon) createOutputFile(opath string) error {
 	return nil
 }
 
-// setConcurrency set the concurrency as per min and max
-func (sum *summon) setConcurrency(c int) {
+// run is basically the start method
+func (sum *summon) run() error {
 
-	if c <= 0 {
-		sum.concurrency = MIN_CONN
-		return
+	isSupported, contentLength, err := getRangeDetails(sum.uri)
+
+	log.Printf("Multiple Connections Supported : %v | Got Content Length : %v", isSupported, contentLength)
+	log.Printf("Using %v connections", sum.concurrency)
+
+	if err != nil {
+		return err
 	}
 
-	if c >= 60 {
-		sum.concurrency = MAX_CONN
-		return
-	}
-
-	sum.concurrency = c
+	return sum.process(contentLength)
 
 }
 
+// process is the manager method
 func (sum *summon) process(contentLength int) error {
 
 	//Close the output file after everything is done
@@ -209,58 +197,90 @@ func (sum *summon) process(contentLength int) error {
 		defer os.Remove(f.Name())
 
 		sum.chunks[index] = f
+		sum.progressBar[index] = &progress{curr: 0, total: j - i}
 
 		wg.Add(1)
-		go sum.downloadFileForRange(wg, sum.uri, strconv.Itoa(i)+"-"+strconv.Itoa(j), f)
+		go sum.downloadFileForRange(wg, sum.uri, strconv.Itoa(i)+"-"+strconv.Itoa(j), index, f)
 		index++
 	}
 
+	stop := make(chan struct{})
+
+	//Keep Printing Progress
+	go sum.startProgressBar(stop)
 	wg.Wait()
 
+	stop <- struct{}{}
+
 	if sum.err != nil {
+		os.Remove(sum.out.Name())
 		return sum.err
 	}
 
 	return sum.combineChunks()
 }
 
-// downloadFileForRange will download the file for the provided range and set the bytes to the chunk map, will set summor.error field if error occurs
-func (sum *summon) downloadFileForRange(wg *sync.WaitGroup, u, r string, handle io.Writer) {
-	if wg != nil {
-		defer wg.Done()
+func (sum *summon) startProgressBar(stop chan struct{}) {
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			for i := 0; i < len(sum.progressBar); i++ {
+
+				sum.RLock()
+				p := *sum.progressBar[i]
+				sum.RUnlock()
+
+				printProgress(i, p)
+			}
+
+			//Move cursor back
+			for i := 0; i < len(sum.progressBar); i++ {
+				fmt.Print("\033[F")
+			}
+
+		case <-stop:
+			for i := 0; i < len(sum.progressBar); i++ {
+				sum.RLock()
+				p := *sum.progressBar[i]
+				sum.RUnlock()
+				printProgress(i, p)
+			}
+			return
+		}
 	}
 
-	request, err := http.NewRequest("GET", u, strings.NewReader(""))
-	if err != nil {
-		sum.err = err
-		return
-	}
+}
 
-	if r != "" {
-		request.Header.Add("Range", "bytes="+r)
-	}
+func printProgress(index int, p progress) {
 
-	_, sc, err := getDataAndWriteToFile(request, handle)
-	if err != nil {
-		sum.err = err
-		return
-	}
+	s := strings.Builder{}
 
-	//206 = Partial Content
-	if sc != 200 && sc != 206 {
-		sum.Lock()
-		sum.err = fmt.Errorf("Did not get 20X status code, got : %v", sc)
-		sum.Unlock()
-		log.Println(sum.err)
-	}
+	percent := math.Round((float64(p.curr) / float64(p.total)) * 100)
 
-	return
+	n := int((percent / 100) * PROGRESS_SIZE)
+
+	s.WriteString("[")
+	for i := 0; i < PROGRESS_SIZE; i++ {
+		if i <= n {
+			s.WriteString(">")
+		} else {
+			s.WriteString(" ")
+		}
+	}
+	s.WriteString("]")
+	s.WriteString(fmt.Sprintf(" %v%%", percent))
+
+	fmt.Printf("Connection %d  - %s\n", index+1, s.String())
 }
 
 // combineChunks will combine the chunks in ordered fashion starting from 1
 func (sum *summon) combineChunks() error {
-	var w int64
 
+	var w int64
 	//maps are not ordered hence using for loop
 	for i := 0; i < len(sum.chunks); i++ {
 		handle := sum.chunks[i]
@@ -272,9 +292,71 @@ func (sum *summon) combineChunks() error {
 		w += written
 	}
 
-	log.Println("Wrote to File :", sum.out.Name(), ", Written bytes :", w)
+	log.Printf("Wrote to File : %v, Written bytes : %v", sum.out.Name(), w)
 
 	return nil
+}
+
+// downloadFileForRange will download the file for the provided range and set the bytes to the chunk map, will set summor.error field if error occurs
+func (sum *summon) downloadFileForRange(wg *sync.WaitGroup, u, r string, index int, handle io.Writer) {
+
+	defer wg.Done()
+
+	request, err := http.NewRequest("GET", u, strings.NewReader(""))
+	if err != nil {
+		sum.err = err
+		return
+	}
+
+	request.Header.Add("Range", "bytes="+r)
+
+	sc, err := sum.getDataAndWriteToFile(request, handle, index)
+	if err != nil {
+		sum.err = err
+		return
+	}
+
+	//206 = Partial Content
+	if sc != 200 && sc != 206 {
+		sum.Lock()
+		sum.err = fmt.Errorf("Did not get 20X status code, got : %v", sc)
+		sum.Unlock()
+		log.Println(sum.err)
+		return
+	}
+
+}
+
+// getRangeDetails returns ifRangeIsSupported,statuscode,error
+func getRangeDetails(u string) (bool, int, error) {
+
+	request, err := http.NewRequest("HEAD", u, strings.NewReader(""))
+	if err != nil {
+		return false, 0, fmt.Errorf("Error while creating request : %v", err)
+	}
+
+	sc, headers, _, err := doAPICall(request)
+	if err != nil {
+		return false, 0, fmt.Errorf("Error calling url : %v", err)
+	}
+
+	if sc != 200 && sc != 206 {
+		return false, 0, fmt.Errorf("Did not get 200 or 206 response")
+	}
+
+	conLen := headers.Get("Content-Length")
+	cl, err := strconv.Atoi(conLen)
+	if err != nil {
+		return false, 0, fmt.Errorf("Error Parsing content length : %v", err)
+	}
+
+	//Accept-Ranges: bytes
+	if headers.Get("Accept-Ranges") == "bytes" {
+		return true, cl, nil
+	}
+
+	return false, cl, nil
+
 }
 
 // doAPICall will do the api call and return statuscode,headers,data,error respectively
@@ -290,29 +372,81 @@ func doAPICall(request *http.Request) (int, http.Header, []byte, error) {
 	}
 	defer response.Body.Close()
 
-	data, err := io.ReadAll(response.Body)
+	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return 0, http.Header{}, []byte{}, fmt.Errorf("Error while reading response body : %v", err)
 	}
 
 	return response.StatusCode, response.Header, data, nil
+
 }
 
-func getDataAndWriteToFile(request *http.Request, f io.Writer) (int64, int, error) {
+// getDataAndWriteToFile will get the response and write to file
+func (sum *summon) getDataAndWriteToFile(request *http.Request, f io.Writer, index int) (int, error) {
+
 	client := http.Client{
 		Timeout: 0,
 	}
 
 	response, err := client.Do(request)
 	if err != nil {
-		return 0, response.StatusCode, fmt.Errorf("Error while doing request : %v", err)
+		return response.StatusCode, fmt.Errorf("Error while doing request : %v", err)
 	}
 	defer response.Body.Close()
 
-	w, err := io.Copy(f, response.Body)
-	if err != nil {
-		return 0, response.StatusCode, fmt.Errorf("Error while copying response to file : %v", err)
+	//we make buffer of 500 bytes and try to read 500 bytes every iteration.
+	var buf = make([]byte, 500)
+	var readTotal int
+
+	for {
+		select {
+		case cErr := <-sum.stop:
+			return response.StatusCode, cErr
+		default:
+			err := sum.readBody(response, f, buf, &readTotal, index)
+			if err == io.EOF {
+				return response.StatusCode, nil
+			}
+
+			if err != nil {
+				return response.StatusCode, err
+			}
+		}
+	}
+}
+
+func (sum *summon) readBody(response *http.Response, f io.Writer, buf []byte, readTotal *int, index int) error {
+
+	r, err := response.Body.Read(buf)
+
+	if r > 0 {
+		f.Write(buf[:r])
 	}
 
-	return w, response.StatusCode, nil
+	if err != nil {
+		return err
+	}
+
+	*readTotal += r
+
+	sum.Lock()
+	sum.progressBar[index].curr = *readTotal
+	sum.Unlock()
+
+	return nil
+}
+
+func (sum *summon) catchSignals() {
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	go func() {
+		s := <-sigc
+		for i := 0; i < len(sum.chunks); i++ {
+			sum.stop <- fmt.Errorf("got stop signal : %v", s)
+		}
+	}()
 }
