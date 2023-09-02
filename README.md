@@ -1,4 +1,3 @@
-
 **Example Usage** - `$GOBIN/summon -c 5 http://www.africau.edu/images/default/sample.pdf`
 
 ![Download Example](https://s9.gifyu.com/images/summon.gif)

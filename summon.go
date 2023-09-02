@@ -139,6 +139,7 @@ func (sum *summon) process() error {
 	return sum.combineChunks()
 }
 
+// The reason for this type is that our download & resumeDownload have the same method definition.  We have also created  getDownloader method which returns a downloader.
 func (sum *summon) getDownloader() downloader {
 
 	if sum.isResume {
