@@ -25,7 +25,6 @@ func init() {
 var ErrGracefulShutdown = errors.New("got stop signal")
 
 func main() {
-
 	printWarnings()
 
 	defer recoverMain()
@@ -43,12 +42,10 @@ func main() {
 	}
 
 	LogWriter.Printf("Time took : %v", time.Since(sum.startTime))
-
 }
 
 // run is basically the start method
 func (sum *summon) run() error {
-
 	isSupported, contentLength, err := getRangeDetails(sum.uri)
 	if err != nil {
 		return err
@@ -79,7 +76,6 @@ func (sum *summon) run() error {
 	}
 
 	return nil
-
 }
 
 func (sum *summon) catchSignals() {

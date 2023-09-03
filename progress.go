@@ -21,7 +21,6 @@ type progress struct {
 var progressSize int
 
 func (sum *summon) startProgressBar(wg *sync.WaitGroup, stop chan struct{}) {
-
 	defer wg.Done()
 
 	ticker := time.NewTicker(time.Second)
@@ -31,7 +30,6 @@ func (sum *summon) startProgressBar(wg *sync.WaitGroup, stop chan struct{}) {
 		select {
 		case <-ticker.C:
 			for i := int64(0); i < int64(len(sum.progressBar.p)); i++ {
-
 				sum.progressBar.RLock()
 				p := *sum.progressBar.p[i]
 				sum.progressBar.RUnlock()
@@ -54,11 +52,9 @@ func (sum *summon) startProgressBar(wg *sync.WaitGroup, stop chan struct{}) {
 			return
 		}
 	}
-
 }
 
 func printProgress(index int64, p progress) {
-
 	s := strings.Builder{}
 
 	percent := math.Round((float64(p.curr) / float64(p.total)) * 100)

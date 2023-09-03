@@ -22,7 +22,6 @@ type meta struct {
 
 // getMetaData will set the meta data to summon
 func (sum *summon) setMetaData(fpath string) error {
-
 	fname := sum.getMetaFileName()
 	meta := meta{}
 
@@ -51,7 +50,6 @@ func (sum summon) getMetaFileName() string {
 
 // canBeResumed tells us if the file can be resumed
 func (sum *summon) canBeResumed(fpath string) (bool, []string) {
-
 	// If meta file does not exist we cant resume the download
 	if !fileExists(sum.getMetaFileName()) {
 		return false, []string{}
@@ -65,7 +63,6 @@ func (sum *summon) canBeResumed(fpath string) (bool, []string) {
 	parts := []string{}
 
 	for index, filePath := range sum.metaData.ChunkPaths {
-
 		start, end := sum.metaData.Range[index][0], sum.metaData.Range[index][1]
 
 		finfo, err := os.Stat(filePath)
@@ -85,9 +82,7 @@ func (sum *summon) canBeResumed(fpath string) (bool, []string) {
 }
 
 func (sum *summon) resumeDownload(wg *sync.WaitGroup) error {
-
 	for index := range sum.fileDetails.chunks {
-
 		var start, end, total int64
 
 		// The previous start range + the bytes we have downloaded will give us the new range
@@ -125,7 +120,6 @@ func (sum *summon) resumeDownload(wg *sync.WaitGroup) error {
 }
 
 func (sum *summon) download(wg *sync.WaitGroup) error {
-
 	index := int64(0)
 	split := sum.fileDetails.contentLength / sum.concurrency
 	meta := meta{ChunkPaths: make(map[int64]string), Range: make(map[int64][]int64)}
@@ -172,7 +166,6 @@ func (sum *summon) download(wg *sync.WaitGroup) error {
 	sum.addMetadataToFile(meta)
 
 	return nil
-
 }
 
 func (sum summon) addMetadataToFile(m meta) {
@@ -195,7 +188,6 @@ func (sum summon) addMetadataToFile(m meta) {
 
 // deleteFiles deletes the list of files provided
 func deleteFiles(chunks map[int64]*os.File, tempFileName ...string) error {
-
 	for _, handle := range chunks {
 		if handle == nil {
 			continue
@@ -204,7 +196,6 @@ func deleteFiles(chunks map[int64]*os.File, tempFileName ...string) error {
 	}
 
 	for _, temp := range tempFileName {
-
 		if !fileExists(temp) {
 			continue
 		}
@@ -218,7 +209,6 @@ func deleteFiles(chunks map[int64]*os.File, tempFileName ...string) error {
 
 // createTempOutputFile will create the final output file
 func (sum *summon) createTempOutputFile() error {
-
 	// Check if file already exists with same name
 	if fileExists(sum.fileDetails.absolutePath) {
 		return fmt.Errorf("file : %v already exists", sum.fileDetails.absolutePath)

@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"mime"
 	"net/http"
@@ -44,7 +43,6 @@ type fileDetails struct {
 }
 
 func NewSummon() (*summon, error) {
-
 	args := arguments{}
 
 	parseFlags(&args)
@@ -85,7 +83,6 @@ func NewSummon() (*summon, error) {
 	}
 
 	return sum, nil
-
 }
 
 func validate() (string, error) {
@@ -104,7 +101,6 @@ func validate() (string, error) {
 
 // process is the manager method
 func (sum *summon) process() error {
-
 	progressSize = getProgressSize()
 
 	// pwg is the progressbar waitgroup
@@ -141,7 +137,6 @@ func (sum *summon) process() error {
 
 // The reason for this type is that our download & resumeDownload have the same method definition.  We have also created  getDownloader method which returns a downloader.
 func (sum *summon) getDownloader() downloader {
-
 	if sum.isResume {
 		return sum.resumeDownload
 	}
@@ -150,14 +145,11 @@ func (sum *summon) getDownloader() downloader {
 }
 
 func (sum summon) getTempFileName(index, start, end int64) (string, error) {
-
 	return fmt.Sprintf("%s%s.%s.sump%d", sum.fileDetails.fileDir, sum.separator, sum.fileDetails.fileName, index), nil
-
 }
 
 // setConcurrency set the concurrency as per min and max
 func (sum *summon) setConcurrency(c int64) {
-
 	// We use default connections in case no concurrency is passed
 	if c <= 0 {
 		log.Println("Using default number of connections", DEFAULT_CONN)
@@ -174,9 +166,7 @@ func (sum *summon) setConcurrency(c int64) {
 }
 
 func (sum *summon) setAbsolutePath(opath string) error {
-
 	if opath == "" {
-
 		filename, err := getFileNameFromHeaders(sum.uri)
 		if err != nil {
 			return err
@@ -217,7 +207,6 @@ func (sum *summon) setFileDir() {
 
 // combineChunks will combine the chunks in ordered fashion starting from 1
 func (sum *summon) combineChunks() error {
-
 	LogWriter.Printf("Combining the files...")
 
 	var w int64
@@ -254,7 +243,6 @@ func (sum *summon) combineChunks() error {
 
 // downloadFileForRange will download the file for the provided range and set the bytes to the chunk map, will set summor.error field if error occurs
 func (sum *summon) downloadFileForRange(wg *sync.WaitGroup, r string, index int64, handle io.Writer) {
-
 	LogWriter.Printf("Downloading for range : %s , for index : %d", r, index)
 	defer wg.Done()
 
@@ -291,14 +279,13 @@ func (sum *summon) downloadFileForRange(wg *sync.WaitGroup, r string, index int6
 		sum.Lock()
 		sum.err = err
 		sum.Unlock()
+		log.Println(sum.err)
 		return
 	}
-
 }
 
 // getRangeDetails returns ifRangeIsSupported,statuscode,error
 func getRangeDetails(u string) (bool, int64, error) {
-
 	request, err := http.NewRequest("HEAD", u, strings.NewReader(""))
 	if err != nil {
 		return false, 0, fmt.Errorf("error while creating request : %v", err)
@@ -326,12 +313,10 @@ func getRangeDetails(u string) (bool, int64, error) {
 	}
 
 	return false, cl[0], nil
-
 }
 
 // doAPICall will do the api call and return statuscode,headers,data,error respectively
 func doAPICall(request *http.Request) (int, http.Header, []byte, error) {
-
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -342,17 +327,15 @@ func doAPICall(request *http.Request) (int, http.Header, []byte, error) {
 	}
 	defer response.Body.Close()
 
-	data, err := ioutil.ReadAll(response.Body)
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		return 0, http.Header{}, []byte{}, fmt.Errorf("error while reading response body : %v", err)
 	}
 
 	return response.StatusCode, response.Header, data, nil
-
 }
 
 func getFileNameFromHeaders(u string) (string, error) {
-
 	request, err := http.NewRequest("HEAD", u, strings.NewReader(""))
 	if err != nil {
 		return "", err
@@ -386,7 +369,6 @@ func getFileNameFromHeaders(u string) (string, error) {
 
 // getDataAndWriteToFile will get the response and write to file
 func (sum *summon) getDataAndWriteToFile(body io.ReadCloser, f io.Writer, index int64) error {
-
 	defer body.Close()
 
 	// we make buffer of 500 bytes and try to read 500 bytes every iteration.
@@ -412,7 +394,6 @@ func (sum *summon) getDataAndWriteToFile(body io.ReadCloser, f io.Writer, index 
 }
 
 func (sum *summon) readBody(body io.Reader, f io.Writer, buf []byte, index int64) error {
-
 	r, err := body.Read(buf)
 
 	if r > 0 {

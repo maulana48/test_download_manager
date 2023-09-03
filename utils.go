@@ -24,27 +24,22 @@ type arguments struct {
 }
 
 func fileExists(fname string) bool {
-
 	if _, err := os.Stat(fname); !os.IsNotExist(err) {
 		return true
 	}
 
 	return false
-
 }
 
 func parseFlags(args *arguments) {
-
 	flag.Int64Var(&args.connections, "c", 0, "number of concurrent connections")
 	flag.BoolVar(&args.help, "h", false, "displays available flags")
 	flag.BoolVar(&args.verbose, "v", false, "enables debug logs")
 	flag.StringVar(&args.outputFile, "o", "", "output path of downloaded file, default is same directory.")
 	flag.Parse()
-
 }
 
 func encode(b []byte, w io.Writer) error {
-
 	enc := base64.NewEncoder(base64.StdEncoding, w)
 	defer enc.Close()
 	_, err := enc.Write(b)
@@ -53,11 +48,9 @@ func encode(b []byte, w io.Writer) error {
 	}
 
 	return nil
-
 }
 
 func decode(b []byte) ([]byte, error) {
-
 	r := bytes.NewReader(b)
 	out := make([]byte, len(b))
 	dec := base64.NewDecoder(base64.StdEncoding, r)
@@ -70,7 +63,6 @@ func decode(b []byte) ([]byte, error) {
 }
 
 func parseint64(s ...string) ([]int64, error) {
-
 	var err error
 	var r uint64
 	var ret []int64
@@ -127,7 +119,6 @@ func printWarnings() {
 }
 
 func humanSizeFromBytes(b int64) string {
-
 	const unit = 1024
 	if b < unit {
 		return fmt.Sprintf("%d B", b)
@@ -138,5 +129,4 @@ func humanSizeFromBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-
 }
