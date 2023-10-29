@@ -5,11 +5,9 @@
 **Flags Available**
 
      -c int
-    	     number of concurrent connections
-          
+          number of concurrent connections
      -h
           displays available flags
-          
      -o string
           output path of downloaded file, default is same directory.
 
